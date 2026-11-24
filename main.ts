@@ -1,4 +1,4 @@
-// A working token-radar-01 entry (Node 22, standard library only).
+// A working token-radar-01 entry (Node 22, standard library only), second telling.
 //
 // The program reads the sealed snapshot from /input/snapshot.json (or --input <file|dir>), scores every
 // pre-token protocol with the model in lib/model.ts, writes the ranked board to /output/board.json, and
@@ -26,21 +26,33 @@ const TEXT_MAX_BYTES = 65_536;
 const SCREENSHOT_CAPS = { max: 4, max_bytes: 524_288 };
 const IMAGE_NAME = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$/;
 
-/** --name <value> out of the arguments, or the fallback. */
-function arg(name: string, fallback: string): string {
-  const at = process.argv.indexOf(`--${name}`);
-  if (at >= 0 && at + 1 < process.argv.length) return process.argv[at + 1]!;
-  const withEquals = process.argv.find((a) => a.startsWith(`--${name}=`));
-  return withEquals === undefined ? fallback : withEquals.slice(name.length + 3);
+/** The command line's flags, read once into a map: `--name value` and `--name=value` alike.
+ * A bare `--name` at the end, with no value after it, is left out rather than
+ * taking the next flag as its value. */
+function readFlags(argv: string[]): Map<string, string> {
+  const flags = new Map<string, string>();
+  for (let i = 0; i < argv.length; i++) {
+    const token = argv[i]!;
+    if (!token.startsWith('--')) continue;
+    const eq = token.indexOf('=');
+    if (eq >= 0) {
+      flags.set(token.slice(2, eq), token.slice(eq + 1));
+    } else if (i + 1 < argv.length && !argv[i + 1]!.startsWith('--')) {
+      flags.set(token.slice(2), argv[i + 1]!);
+      i++;
+    }
+  }
+  return flags;
 }
 
-const inputArg = arg('input', '/input');
+const flags = readFlags(process.argv.slice(2));
+const inputArg = flags.get('input') ?? '/input';
 const inputFile = inputArg.endsWith('.json') ? inputArg : join(inputArg, 'snapshot.json');
 if (!existsSync(inputFile)) {
   process.stderr.write(`token radar: no snapshot at ${inputFile}: pass --input <snapshot.json|directory> or mount the sealed /input\n`);
   process.exit(2);
 }
-const out = arg('output', process.env.MAKEFUN_OUTPUT_DIR ?? '/output');
+const out = flags.get('output') ?? process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 
 const snapshot = parseSnapshot(readFileSync(inputFile, 'utf8'));
 const { board, radar } = buildRadar(snapshot);
@@ -54,8 +66,8 @@ mkdirSync(out, { recursive: true });
 writeFileSync(join(out, 'board.json'), `${JSON.stringify({ rows: board })}\n`);
 writeFileSync(join(out, 'data.js'), dataScript(radar));
 
-/** Copy one directory's regular files into `to`, skipping names that start with a dot. */
-function copyFiles(from: string, to: string): string[] {
+/** One directory's regular files copied into `to`, skipping dotfiles; answers the names it copied. */
+function copyDirectory(from: string, to: string): string[] {
   if (!existsSync(from)) return [];
   mkdirSync(to, { recursive: true });
   const copied: string[] = [];
@@ -69,8 +81,8 @@ function copyFiles(from: string, to: string): string[] {
   return copied;
 }
 
-copyFiles(join(here, 'dashboard'), join(out, 'dashboard'));
-const shots = copyFiles(join(here, 'screenshots'), join(out, 'screenshots'));
+copyDirectory(join(here, 'dashboard'), join(out, 'dashboard'));
+const shots = copyDirectory(join(here, 'screenshots'), join(out, 'screenshots'));
 if (shots.length < 3) {
   process.stderr.write(`token radar: screenshots/ holds ${shots.length} image${shots.length === 1 ? '' : 's'}: hand in 3, the board, a detail view and a filtered view\n`);
   process.exit(1);
